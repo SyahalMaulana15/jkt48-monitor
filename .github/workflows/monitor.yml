@@ -1,0 +1,48 @@
+name: JKT48 Ticket Monitor
+
+on:
+  schedule:
+    # Jalankan setiap 1 menit (interval minimum GitHub Actions)
+    - cron: "* * * * *"
+  workflow_dispatch:
+    # Tombol "Run workflow" manual di GitHub Actions tab
+
+jobs:
+  check-tickets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          # Perlu token agar bisa push state.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Restore state dari cache
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: jkt48-state-${{ github.run_id }}
+          restore-keys: |
+            jkt48-state-
+
+      - name: Jalankan monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Simpan state (untuk run berikutnya)
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: jkt48-state-${{ github.run_id }}
