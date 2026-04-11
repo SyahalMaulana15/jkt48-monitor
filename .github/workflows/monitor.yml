@@ -1,0 +1,97 @@
+name: JKT48 Ticket Monitor
+
+on:
+  schedule:
+    # Jalankan setiap 1 menit
+    - cron: "* * * * *"
+
+  workflow_dispatch:
+    # Tombol manual — bisa pilih mode
+    inputs:
+      mode:
+        description: "Pilih mode"
+        required: true
+        default: "normal"
+        type: choice
+        options:
+          - normal
+          - test
+
+jobs:
+  check-tickets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Restore state dari cache
+        uses: actions/cache@v4
+        with:
+          path: state.json
+          key: jkt48-state-${{ github.run_id }}
+          restore-keys: |
+            jkt48-state-
+
+      - name: Jalankan monitor (mode normal)
+        if: ${{ github.event.inputs.mode != 'test' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Jalankan monitor (mode TES)
+        if: ${{ github.event.inputs.mode == 'test' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py --test
+
+      - name: Simpan state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: jkt48-state-${{ github.run_id }}
+
+  # ── Keepalive: cegah repo dinonaktifkan GitHub ──────────────────
+  # GitHub otomatis menonaktifkan Actions di repo yang tidak ada
+  # commit selama 60 hari. Job ini commit otomatis tiap 50 hari.
+  keepalive:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cek kapan commit terakhir
+        id: check
+        run: |
+          LAST=$(git log -1 --format="%ct")
+          NOW=$(date +%s)
+          DIFF=$(( (NOW - LAST) / 86400 ))
+          echo "days_since_commit=$DIFF" >> $GITHUB_OUTPUT
+          echo "Hari sejak commit terakhir: $DIFF"
+
+      - name: Commit keepalive jika sudah 50 hari
+        if: ${{ steps.check.outputs.days_since_commit >= 50 }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "keepalive: $(date -u)" >> keepalive.txt
+          git add keepalive.txt
+          git commit -m "chore: keepalive agar Actions tetap aktif"
+          git push
